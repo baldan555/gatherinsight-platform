@@ -21,8 +21,9 @@ Infrastructure as code, CI/CD and the public landing page of **GatherInsight**, 
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph gh["GitHub Actions"]
+    direction LR
     app["gatherinsight (private)<br/>CI/CD"]
     tf["gatherinsight-platform<br/>Terraform"]
     lp["gatherinsight-platform<br/>Landing page"]
