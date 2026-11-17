@@ -1,0 +1,4 @@
+# What `gcloud run deploy --source landing` uploads to Cloud Build: only what the image needs.
+preview/
+README.md
+CATATAN-PRIBADI.md

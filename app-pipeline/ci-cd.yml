@@ -1,0 +1,185 @@
+# Every push and pull request: typecheck + unit tests.
+# Every push to main (or a manual run): build the images, migrate the database, deploy the new revision
+# with no traffic, smoke-test it on its own URL, and only then move traffic to it.
+#
+# Google Cloud access uses Workload Identity Federation (short-lived OIDC tokens; no keys stored in GitHub).
+# The deployer's permissions and the infrastructure itself are defined in Terraform in the public
+# repository baldan555/gatherinsight-platform.
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_ID: gatherinsight
+  REGION: asia-southeast1
+  SERVICE: gatherinsight
+  MIGRATE_JOB: gi-migrate
+  SQL_INSTANCE: gi-db
+  REGISTRY: asia-southeast1-docker.pkg.dev/gatherinsight/gi
+  WIF_PROVIDER: projects/1021483580038/locations/global/workloadIdentityPools/gi-github/providers/github-oidc
+  DEPLOY_SA: gh-deploy-app@gatherinsight.iam.gserviceaccount.com
+
+jobs:
+  verify:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/ci # nothing connects; Prisma only needs the shape
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate the Prisma client and route types
+        run: |
+          npx prisma generate
+          npx next typegen
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.ci.json
+
+      - name: Unit tests
+        run: bash scripts/ci/unit-tests.sh
+
+  deploy:
+    name: Release to Cloud Run
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # lets the job request an OIDC token for Google Cloud
+    concurrency:
+      group: production
+      cancel-in-progress: false # never stop a release halfway
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Preflight (permissions only, changes nothing)
+        run: bash scripts/ci/preflight.sh
+
+      # The database is switched off between demos to save money (deploy/power.sh). Migrations need it,
+      # so while it is off the release stops here with a warning instead of failing.
+      - name: Is the database switched on?
+        id: db
+        run: |
+          read -r policy state < <(gcloud sql instances describe "$SQL_INSTANCE" --project "$PROJECT_ID" \
+            --format="value(settings.activationPolicy,state)")
+          echo "Cloud SQL ${SQL_INSTANCE}: activation policy ${policy}, state ${state}"
+          if [ "$policy" = "ALWAYS" ] && [ "$state" = "RUNNABLE" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            msg="Cloud SQL (${SQL_INSTANCE}) is switched off (${state}), so migrations cannot run and nothing was released. Turn it on with 'bash deploy/power.sh on', then run this workflow again (Actions > CI/CD > Run workflow)."
+            echo "::warning title=Release skipped: the database is off::${msg}"
+            { echo "### Release skipped"; echo; echo "${msg}"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Image tag
+        if: steps.db.outputs.ready == 'true'
+        id: tag
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.db.outputs.ready == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - if: steps.db.outputs.ready == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Build and push the migrator image
+        if: steps.db.outputs.ready == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrator
+          push: true
+          tags: ${{ env.REGISTRY }}/migrator:${{ steps.tag.outputs.tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push the app image
+        if: steps.db.outputs.ready == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/app:${{ steps.tag.outputs.tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Migrations run before the new code serves anyone, so they must stay compatible with the revision
+      # that is still live (add first, remove in a later release).
+      - name: Migrate the database
+        if: steps.db.outputs.ready == 'true'
+        run: |
+          gcloud run jobs update "$MIGRATE_JOB" --image "${REGISTRY}/migrator:${{ steps.tag.outputs.tag }}" \
+            --region "$REGION" --project "$PROJECT_ID" --quiet
+          gcloud run jobs execute "$MIGRATE_JOB" --region "$REGION" --project "$PROJECT_ID" --wait
+
+      - name: Deploy the new revision with no traffic
+        if: steps.db.outputs.ready == 'true'
+        id: candidate
+        run: |
+          gcloud run deploy "$SERVICE" --image "${REGISTRY}/app:${{ steps.tag.outputs.tag }}" \
+            --region "$REGION" --project "$PROJECT_ID" --no-traffic --tag candidate --quiet
+          url="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format=json \
+            | jq -r '.status.traffic[] | select(.tag == "candidate") | .url')"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test the new revision on its own URL
+        if: steps.db.outputs.ready == 'true'
+        run: bash scripts/ci/smoke-test.sh "${{ steps.candidate.outputs.url }}"
+
+      - name: Move traffic to the new revision
+        if: steps.db.outputs.ready == 'true'
+        id: promote
+        run: |
+          gcloud run services update-traffic "$SERVICE" --to-latest --region "$REGION" --project "$PROJECT_ID" --quiet
+          gcloud run services update-traffic "$SERVICE" --remove-tags candidate --region "$REGION" --project "$PROJECT_ID" --quiet
+
+      - name: Check production
+        if: steps.db.outputs.ready == 'true'
+        run: |
+          url="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
+          bash scripts/ci/smoke-test.sh "$url"
+          revision="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.latestReadyRevisionName)')"
+          { echo "### Released ${{ steps.tag.outputs.tag }}"; echo; echo "Revision \`${revision}\` serves 100% of traffic at ${url}"; } >> "$GITHUB_STEP_SUMMARY"
+
+      # A failed candidate never received traffic; drop its tag so the previous revision stays the only one live.
+      - name: Clean up after a failed release
+        if: failure() && steps.candidate.outcome == 'success' && steps.promote.outcome != 'success'
+        run: |
+          gcloud run services update-traffic "$SERVICE" --remove-tags candidate --region "$REGION" --project "$PROJECT_ID" --quiet || true
+          echo "::error title=Release stopped::The new revision failed its checks and received no traffic. The previous revision is still live."

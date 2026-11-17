@@ -1,0 +1,16 @@
+# full-page previews of the landing page (large; regenerated locally)
+landing/preview/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars.local
+tfplan
+
+# personal notes about the landing page (kept on this computer only)
+landing/CATATAN-PRIBADI.md
+infra/plan.txt
+infra/plan.json
+infra/summary.md
