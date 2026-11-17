@@ -28,21 +28,12 @@ variable "github_owner_id" {
   default     = "64614565"
 }
 
-variable "github_repos" {
-  description = "Repositories (owner/name) whose GitHub Actions may exchange tokens with Google Cloud."
-  type        = map(string)
-  default = {
-    app      = "baldan555/gatherinsight"          # private: the application
-    platform = "baldan555/gatherinsight-platform" # public: this repository
-  }
-}
-
 variable "github_repo_ids" {
-  description = "Numeric GitHub ids of the same repositories (ids never change, names can)."
+  description = "Numeric GitHub ids of the repositories whose Actions may use Google Cloud (ids never change, names can)."
   type        = map(string)
   default = {
-    app      = "1460985591"
-    platform = "1460997570"
+    app      = "1460985591" # baldan555/gatherinsight (private): the application
+    platform = "1460997570" # baldan555/gatherinsight-platform (public): this repository
   }
 }
 

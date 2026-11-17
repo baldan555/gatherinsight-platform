@@ -46,16 +46,21 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = "github-oidc"
   display_name                       = "GitHub OIDC"
 
+  # Roles are granted on numeric repository ids plus the branch or event, never on names or on the
+  # `sub` claim, whose format GitHub lets each repository change.
   attribute_mapping = {
-    "google.subject"          = "assertion.sub" # e.g. repo:owner/name:ref:refs/heads/main
-    "attribute.repository"    = "assertion.repository"
-    "attribute.repository_id" = "assertion.repository_id"
-    "attribute.ref"           = "assertion.ref"
+    "google.subject"         = "assertion.sub" # shown in audit logs
+    "attribute.repository"   = "assertion.repository"
+    "attribute.ref"          = "assertion.ref"
+    "attribute.repo_ref"     = "assertion.repository_id + '/' + assertion.ref"        # e.g. 1460997570/refs/heads/main
+    "attribute.repo_event"   = "assertion.repository_id + '/' + assertion.event_name" # e.g. 1460997570/pull_request
+    "attribute.workflow_ref" = "assertion.workflow_ref"
   }
 
-  # Tokens from any other account or repository are rejected before any role is even considered.
+  # Tokens from any other account or repository are rejected before any role is even considered, and so
+  # are pull_request_target runs (they carry main's ref but can be started by outside pull requests).
   attribute_condition = format(
-    "assertion.repository_owner_id == '%s' && assertion.repository_id in [%s]",
+    "assertion.repository_owner_id == '%s' && assertion.repository_id in [%s] && assertion.event_name != 'pull_request_target'",
     var.github_owner_id,
     join(", ", [for id in values(var.github_repo_ids) : "'${id}'"]),
   )
@@ -66,32 +71,34 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 }
 
 locals {
-  wif_subject = "principal://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}/subject"
+  wif_pool = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${google_iam_workload_identity_pool.github.workload_identity_pool_id}"
 
-  # Which GitHub workflow runs may act as which deployer. Only pushes to main can deploy or apply;
-  # pull requests get a read-only identity for `terraform plan`.
+  main_of = { for k, id in var.github_repo_ids : k => "${local.wif_pool}/attribute.repo_ref/${id}/refs/heads/main" }
+
+  # Which GitHub workflow runs may act as which deployer. Only runs on main (pushes, manual runs, the
+  # weekly drift check) can deploy or apply; pull requests get a read-only identity for `terraform plan`.
   ci_accounts = {
     gh-deploy-app = {
-      display  = "GitHub: release the app"
-      subjects = ["repo:${var.github_repos.app}:ref:refs/heads/main"]
+      display    = "GitHub: release the app"
+      principals = [local.main_of.app]
     }
     gh-deploy-landing = {
-      display  = "GitHub: deploy the landing page"
-      subjects = ["repo:${var.github_repos.platform}:ref:refs/heads/main"]
+      display    = "GitHub: deploy the landing page"
+      principals = [local.main_of.platform]
     }
     gh-terraform = {
-      display  = "GitHub: terraform apply"
-      subjects = ["repo:${var.github_repos.platform}:ref:refs/heads/main"]
+      display    = "GitHub: terraform apply"
+      principals = [local.main_of.platform]
     }
     gh-terraform-plan = {
-      display  = "GitHub: terraform plan (read-only)"
-      subjects = ["repo:${var.github_repos.platform}:pull_request"]
+      display    = "GitHub: terraform plan (read-only)"
+      principals = ["${local.wif_pool}/attribute.repo_event/${var.github_repo_ids.platform}/pull_request"]
     }
   }
 
   ci_bindings = merge([
     for sa, cfg in local.ci_accounts : {
-      for subject in cfg.subjects : "${sa}|${subject}" => { sa = sa, subject = subject }
+      for i, p in cfg.principals : "${sa}#${i}" => { sa = sa, principal = p }
     }
   ]...)
 }
@@ -106,7 +113,7 @@ resource "google_service_account_iam_member" "ci_federation" {
   for_each           = local.ci_bindings
   service_account_id = google_service_account.ci[each.value.sa].name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "${local.wif_subject}/${each.value.subject}"
+  member             = each.value.principal
 }
 
 # ---------------------------------------------------------------- gh-deploy-app: build, migrate, roll out
