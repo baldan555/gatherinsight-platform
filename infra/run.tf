@@ -105,6 +105,7 @@ resource "google_cloud_run_v2_service" "app" {
       client,
       client_version,
       template[0].containers[0].image, # set by the app pipeline (private repository)
+      template[0].revision,            # named by the pipeline when it deploys a tagged candidate
       traffic,                         # the pipeline tests each new revision with no traffic, then promotes it
     ]
   }
