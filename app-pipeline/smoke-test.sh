@@ -18,8 +18,10 @@ fi
 echo "  ok    /api/health"
 
 expect() { # method, path, accepted statuses (a|b), label
-  local got
-  got="$(curl -s -m 60 -o /dev/null -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' -d '{}' "${URL}$2")"
+  local got body=()
+  # a GET carries no body: over HTTP/2 the Cloud Run front end resets a GET that has one
+  [ "$1" != "GET" ] && body=(-H 'Content-Type: application/json' -d '{}')
+  got="$(curl -s -m 60 -o /dev/null -w '%{http_code}' -X "$1" "${body[@]}" "${URL}$2" || true)"
   if [[ "$got" =~ ^($3)$ ]]; then
     echo "  ok    $4 ($1 $2 -> $got)"
   else
