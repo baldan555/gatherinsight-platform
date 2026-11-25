@@ -7,13 +7,13 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 TESTS=(
-  action-error audit-coverage basic-location basic-review basic-speeding
+  account-manage action-error audit-coverage basic-location basic-review basic-speeding
   call-link-peer call-number call-queue create-own-project field-group-coverage
   geo-area-engine geo-engines geo-incident-engine geo-incident-insights geo-inspection-engine
   geo-inspection-insights geo-line-engine geo-point-design geo-point-engine geo-point-insights
   geo-point-issues geo-sample-engine geo-sample-rounds-engine geo-traffic-analysis
-  i18n option-labels path-answers question-crosstab question-map question-period
-  question-insights question-trend question-viz response-trend stats survey-channel survey-question-quality
+  i18n option-labels path-answers public-submit-rules question-crosstab question-map question-period
+  question-insights question-trend question-viz response-trend stats stats-exports survey-channel survey-question-quality
   temp-password trend-target voice-openrouter
 )
 
