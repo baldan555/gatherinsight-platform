@@ -63,7 +63,7 @@ cannot connect directly.
 
 ```mermaid
 flowchart LR
-  push["push to main"] --> verify["typecheck +<br/>39 unit test files"]
+  push["push to main"] --> verify["typecheck +<br/>40 unit test files"]
   verify --> pre["preflight:<br/>testIamPermissions"]
   pre --> db{"database<br/>switched on?"}
   db -->|no| skip["stop with a warning<br/>(nothing released)"]

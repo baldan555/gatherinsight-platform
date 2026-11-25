@@ -13,7 +13,7 @@ TESTS=(
   geo-inspection-insights geo-line-engine geo-point-design geo-point-engine geo-point-insights
   geo-point-issues geo-sample-engine geo-sample-rounds-engine geo-traffic-analysis
   i18n option-labels path-answers question-crosstab question-map question-period
-  question-trend question-viz response-trend stats survey-channel survey-question-quality
+  question-insights question-trend question-viz response-trend stats survey-channel survey-question-quality
   temp-password trend-target voice-openrouter
 )
 
