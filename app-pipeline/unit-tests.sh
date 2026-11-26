@@ -11,7 +11,7 @@ TESTS=(
   call-link-peer call-number call-queue comparison create-own-project field-group-coverage forecast
   geo-area-engine geo-engines geo-incident-engine geo-incident-insights geo-inspection-engine
   geo-inspection-insights geo-line-engine geo-point-design geo-point-engine geo-point-insights
-  geo-point-issues geo-sample-engine geo-sample-rounds-engine geo-traffic-analysis
+  geo-point-issues geo-sample-engine geo-sample-rounds-engine geo-traffic-analysis helper-tours
   i18n office option-labels path-answers public-submit-rules question-crosstab question-map question-period
   question-insights question-trend question-viz estimator logic-test questionnaire-diff questionnaire-readiness response-trend spss-export stats stats-exports survey-channel survey-overview survey-question-quality survey-report-extra supervisor-menu
   survey-waves temp-password trend-target voice-openrouter wave-trend-exports
