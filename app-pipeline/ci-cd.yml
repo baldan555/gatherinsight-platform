@@ -52,6 +52,9 @@ jobs:
           npx next typegen
 
       - name: Typecheck
+        # the whole app no longer fits in Node's default ~2 GB heap; the runner has room for more
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: npx tsc --noEmit -p tsconfig.ci.json
 
       - name: Unit tests
