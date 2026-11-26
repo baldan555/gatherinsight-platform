@@ -34,7 +34,7 @@ jobs:
       - name: Every image the pages use is in the repository
         run: |
           missing=0
-          for f in $(grep -ohE '(img|preview)/[A-Za-z0-9._/-]+\.(webp|png|svg)' landing/index.html landing/id.html | sort -u); do
+          for f in $(grep -ohE '(img|preview)/[A-Za-z0-9._/-]+\.(webp|png|svg)' landing/*.html | sort -u); do
             [ -f "landing/$f" ] || { echo "::error file=landing/index.html::missing landing/$f"; missing=1; }
           done
           exit $missing
@@ -46,7 +46,7 @@ jobs:
         run: |
           docker run -d --name site -p 8080:8080 landing:test
           for i in $(seq 1 20); do curl -fs -o /dev/null localhost:8080/ && break; sleep 1; done
-          for page in index.html id.html; do
+          for page in index.html id.html platform.html platform-id.html; do
             path="/$page"; [ "$page" = index.html ] && path="/"
             curl -fsS "localhost:8080${path}" | cmp -s - "landing/$page" \
               || { echo "::error::${path} does not serve landing/${page}"; exit 1; }
@@ -107,6 +107,9 @@ jobs:
           for base in "$url" "$SITE"; do
             curl -fsS "${base}/" | cmp -s - landing/index.html || { echo "::error::${base}/ is not serving this commit"; exit 1; }
             curl -fsS "${base}/id.html" | cmp -s - landing/id.html || { echo "::error::${base}/id.html is not serving this commit"; exit 1; }
+            for page in platform.html platform-id.html; do
+              curl -fsS "${base}/${page}" | cmp -s - "landing/${page}" || { echo "::error::${base}/${page} is not serving this commit"; exit 1; }
+            done
             echo "ok  ${base}"
           done
           revision="$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format='value(status.latestReadyRevisionName)')"
