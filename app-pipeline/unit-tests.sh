@@ -14,7 +14,7 @@ TESTS=(
   geo-point-issues geo-sample-engine geo-sample-rounds-engine geo-traffic-analysis
   i18n office option-labels path-answers public-submit-rules question-crosstab question-map question-period
   question-insights question-trend question-viz estimator logic-test questionnaire-diff questionnaire-readiness response-trend spss-export stats stats-exports survey-channel survey-overview survey-question-quality survey-report-extra supervisor-menu
-  temp-password trend-target voice-openrouter
+  survey-waves temp-password trend-target voice-openrouter wave-trend-exports
 )
 
 # Anything that tries to reach a database fails fast instead of hanging.
